@@ -8,6 +8,8 @@
     ],
     "cSpell.words": [
         "pytest",
+        "showindex",
+        "tablefmt",
         "tidydev"
     ],
     "autopep8.args": [

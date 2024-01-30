@@ -4,7 +4,11 @@ Analyzes a directory and its subdirectories for git repositories and build files
 
 from dataclasses import dataclass
 from os import sep, listdir
-from os.path import isdir, isfile
+from os.path import basename, isdir, isfile
+from typing import Any, Optional
+
+from git import Repo
+from tabulate import tabulate
 
 
 LABEL_FILES: dict[str, set[str]] = {
@@ -29,16 +33,27 @@ LABEL_DIRECTORIES: dict[str, set[str]] = {
 
 
 @dataclass
+class GitStatus:
+    '''Represents the status of a git directory.'''
+
+    uncommitted_changes: bool
+    current_branch: str
+    remotes: list[str]
+
+
+@dataclass
 class Directory:
     '''Represents an analyzed directory.'''
 
     path: str
     is_git: bool
+    git_status: Optional[GitStatus]
     build_labels: list[str]
 
     def __init__(self, path: str):
         self.path = path
         self.is_git = False
+        self.git_status = None
         self.build_labels = []
 
 
@@ -72,25 +87,46 @@ def analyze(path: str) -> Analysis:
     return Analysis(path, directories)
 
 
+def analyze_git(directory: Directory) -> None:
+    '''Analyzes the given directory for git status.'''
+
+    if not directory.is_git:
+        return
+
+    repo = Repo(directory.path)
+    directory.git_status = GitStatus(
+        uncommitted_changes=repo.is_dirty(untracked_files=True),
+        current_branch=repo.active_branch.name,
+        remotes=[remote.name for remote in repo.remotes]
+    )
+
+
 def print_result(analysis: Analysis) -> None:
     '''Prints the result of the analysis to the console.'''
 
-    print(f'Analysis result of {analysis.path}:')
+    print(f'Analysis result of {analysis.path} ({len(analysis.directories)} projects):')
     print()
 
-    git = [directory for directory in analysis.directories if directory.is_git]
-    longest_label = max(len(f'{", ".join(directory.build_labels)}') for directory in git)
-    print(f'The following directories are git repositories ({len(git)} of {len(analysis.directories)}):')
-    for directory in git:
-        _print_single_directory(directory, longest_label)
+    print(tabulate(
+        _transform_to_basic_tabulate_list(analysis.directories),
+        headers=['Project', 'Git', 'Labels'],
+        tablefmt='psql',
+        showindex=False
+    ))
 
+
+def print_git_result(analysis: Analysis) -> None:
+    '''Prints the result of the git analysis to the console.'''
+
+    print(f'Analysis result of {analysis.path} ({len(analysis.directories)} projects):')
     print()
 
-    non_git = [directory for directory in analysis.directories if not directory.is_git]
-    longest_label = max(len(f'{", ".join(directory.build_labels)}') for directory in non_git)
-    print(f'The following directories are not git repositories ({len(non_git)} of {len(analysis.directories)}):')
-    for directory in non_git:
-        _print_single_directory(directory, longest_label)
+    print(tabulate(
+        _transform_to_git_tabulate_list(analysis.directories),
+        headers=['Project', 'Labels', 'Uncommitted Changes', 'Current Branch', 'Remotes'],
+        tablefmt='psql',
+        showindex=False
+    ))
 
 
 def _analyze_labels(sub: set[str], directory: Directory, labels: dict[str, set[str]]):
@@ -98,7 +134,35 @@ def _analyze_labels(sub: set[str], directory: Directory, labels: dict[str, set[s
         if sub & directory_names:
             directory.build_labels.append(label)
 
+    directory.build_labels = list(set(directory.build_labels))
 
-def _print_single_directory(directory: Directory, padding: int) -> None:
-    labels = f'{", ".join(directory.build_labels)}'.ljust(padding, '·')
-    print(f'{labels} {directory.path}')
+
+def _join_labels(labels: list[str]) -> str:
+    return f'{", ".join(labels)}'
+
+
+def _transform_to_basic_tabulate_list(directories: list[Directory]) -> list[list[Any]]:
+    data: list[list[Any]] = []
+    for directory in directories:
+        data.append([
+            basename(directory.path),
+            'yes' if directory.is_git else 'no',
+            _join_labels(directory.build_labels)
+        ])
+
+    return data
+
+
+def _transform_to_git_tabulate_list(directories: list[Directory]) -> list[list[Any]]:
+    data: list[list[Any]] = []
+    for directory in directories:
+        if directory.git_status:
+            data.append([
+                basename(directory.path),
+                _join_labels(directory.build_labels),
+                'yes' if directory.git_status.uncommitted_changes else 'no',
+                directory.git_status.current_branch,
+                _join_labels(directory.git_status.remotes)
+            ])
+
+    return data
