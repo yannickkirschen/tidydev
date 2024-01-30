@@ -23,4 +23,5 @@ Available commands:
     help              - show this help
     version           - show version
     analyze <path>    - analyze the given path for git repositories and build files
+    analyze-git <path>- analyze the given path for git repositories and build files and show git status
 ```
